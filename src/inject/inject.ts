@@ -17,11 +17,12 @@ class GitLabTree
 	fileNames: string[];
 	strippedFileNames: string[];
 	metadata: IMetadata[];
+	databaseState: object;
 
 	wrapperElement: HTMLDivElement = document.createElement( 'div' );
 	leftElement: HTMLDivElement = document.createElement( 'div' );
 	rightElement: HTMLDivElement = document.createElement( 'div' );
-	
+
 	lastActive: string = '';
 
 	hashChangeListener: () => void;
@@ -31,69 +32,6 @@ class GitLabTree
 	constructor()
 	{
 		this.init();
-
-
-		// Detection if we are on GitLab page
-
-		const isGitLab: Element = document.querySelector( 'meta[content="GitLab"]' );
-		if ( ! isGitLab ) { return; }
-
-
-		// Detection if we have any files to generate tree from
-
-		const files: HTMLElement = document.querySelector( '.files' ) as HTMLElement;
-	
-		if ( ! files ) { return; }
-
-		this.fileHolders = files.querySelectorAll( '.file-holder' );
-		if ( ! files || this.fileHolders.length === 0 ) { return; }
-
-		files.classList.add( CSS_PREFIX );
-
-
-		// Obtain metadata
-
-		this.metadata = this.obtainMetadata();
-		if ( this.metadata.length === 0 ) { return; }
-		this.obtainCommentedFiles();
-
-
-		// Hide files
-
-		this.copyAndHideFiles( files );
-
-
-		// Analyze filenames
-
-		this.fileNames = this.metadata.map( m => m.filename );
-		this.pathPrefix = this.getPrefixPath( this.fileNames );
-		this.strippedFileNames = this.removePathPrefix( this.fileNames, this.pathPrefix );
-
-
-		// Create and display DOM
-
-		const fileNamesDOM: HTMLDivElement = this.convertFolderStructureToDOM( this.pathPrefix, this.createFolderStructure( this.strippedFileNames ) )
-
-		this.leftElement.appendChild( fileNamesDOM )
-		files.appendChild( this.wrapperElement );
-
-
-		// Show file based on hash id
-
-		const currentFileHash: string = location.hash;
-		this.showFile( currentFileHash );
-
-
-		// Add expanding feature
-
-		this.expandListener = ( e: MouseEvent ) => (e.target as HTMLElement).classList.contains( 'holder' ) ? this.toggleExpand( e ) : undefined;
-		document.addEventListener( 'click', this.expandListener );
-
-
-		// Add listener for changes
-
-		this.hashChangeListener = this.hashChanged.bind( this )
-		window.addEventListener( 'hashchange', this.hashChangeListener );
 	}
 
 
@@ -106,11 +44,11 @@ class GitLabTree
 		document.removeEventListener( 'click', this.expandListener );
 	}
 
-	
+
 	/**
 	 * Creates required DOM elements.
 	 */
-	init(): void
+	async init()
 	{
 		this.wrapperElement.appendChild( this.leftElement );
 		this.wrapperElement.appendChild( this.rightElement );
@@ -118,12 +56,86 @@ class GitLabTree
 		this.wrapperElement.classList.add( CSS_PREFIX + '-wrapper' );
 		this.leftElement.classList.add( CSS_PREFIX + '-left' );
 		this.rightElement.classList.add( CSS_PREFIX + '-right' );
+
+		await this.obtainSeenState();
+
+        // Detection if we are on GitLab page
+
+        const isGitLab: Element = document.querySelector( 'meta[content="GitLab"]' );
+        if ( ! isGitLab ) { return; }
+
+
+        // Detection if we have any files to generate tree from
+
+        const files: HTMLElement = document.querySelector( '.files' ) as HTMLElement;
+
+        if ( ! files ) { return; }
+
+        this.fileHolders = files.querySelectorAll( '.file-holder' );
+        if ( ! files || this.fileHolders.length === 0 ) { return; }
+
+        files.classList.add( CSS_PREFIX );
+
+
+        // Obtain metadata
+
+        this.metadata = this.obtainMetadata();
+        if ( this.metadata.length === 0 ) { return; }
+        this.obtainCommentedFiles();
+
+
+        // Hide files
+
+        this.copyAndHideFiles( files );
+
+
+        // Analyze filenames
+
+        this.fileNames = this.metadata.map( m => m.filename );
+        this.pathPrefix = this.getPrefixPath( this.fileNames );
+        this.strippedFileNames = this.removePathPrefix( this.fileNames, this.pathPrefix );
+
+
+        // Create and display DOM
+
+        const fileNamesDOM: HTMLDivElement = this.convertFolderStructureToDOM( this.pathPrefix, this.createFolderStructure( this.strippedFileNames ) )
+
+        this.leftElement.appendChild( fileNamesDOM )
+        files.appendChild( this.wrapperElement );
+
+
+        // Show file based on hash id
+
+        const currentFileHash: string = location.hash;
+        this.showFile( currentFileHash );
+
+
+        // Add expanding feature
+
+        this.expandListener = ( e: MouseEvent ) => (e.target as HTMLElement).classList.contains( 'holder' ) ? this.toggleExpand( e ) : undefined;
+        document.addEventListener( 'click', this.expandListener );
+
+
+        // Add listener for changes
+
+        this.hashChangeListener = this.hashChanged.bind( this )
+        window.addEventListener( 'hashchange', this.hashChangeListener );
 	}
 
+    obtainSeenState(): Promise<object>
+    {
+        return new Promise((resolve) => {
+            chrome.storage.local.get((obj) => {
+                this.databaseState = obj;
+                resolve();
+            })
+        });
+
+    }
 
 	/**
 	 * Collects basic information about files - their names, their hashes, and happend to them.
-	 * 
+	 *
 	 * @return {IMetadata} - collected metadata
 	 */
 	obtainMetadata(): IMetadata[]
@@ -149,7 +161,7 @@ class GitLabTree
 		else
 		{
 			return this.obtainMetadata_v9_5( metadataFiles_v9_5() );
-		}		
+		}
 	}
 
 	/**
@@ -168,7 +180,7 @@ class GitLabTree
 			const hash: string = rawFileMetadata.querySelector( 'a' ).getAttribute('href');
 			const filename: string = rawFileMetadata.querySelector( '.diff-changed-file-path' ).textContent.trim();
 			const isCred: boolean = svgElement.classList.contains( 'cred' );
-			
+
 			let type: EFileState = EFileState.UPDATED;
 
 
@@ -203,7 +215,7 @@ class GitLabTree
 			const hash: string = rawFileMetadata.querySelector( 'a' ).getAttribute('href');
 			let filename: string = rawFileMetadata.querySelector( '.diff-file-changes-path' ).textContent.trim();
 			let type: EFileState = EFileState.UPDATED;
-			
+
 
 			// When file renamed, show renamed file
 
@@ -228,7 +240,7 @@ class GitLabTree
 
 		return metadata;
 	}
-	
+
 	/**
 	 * It does obtain metadata for Gitlab < 9.5 (Collects basic information about files - their names, their hashes and what happend to them).
 	 * See https://github.com/tomasbonco/gitlabtree/issues/2
@@ -244,7 +256,7 @@ class GitLabTree
 			const hash: string = rawFileMetadata.querySelector( 'a' ).getAttribute('href');
 			let filename: string = rawFileMetadata.querySelector( 'a' ).textContent.trim();
 			let type: EFileState = EFileState.UPDATED;
-			
+
 
 			// When file renamed, show renamed file
 
@@ -288,7 +300,7 @@ class GitLabTree
 
 	/**
 	 * Returns metadata by index.
-	 * 
+	 *
 	 * @param {number} index - index
 	 * @return {IMetadata} - metadata
 	 */
@@ -301,7 +313,7 @@ class GitLabTree
 	/**
 	 * It loops through files listed (DOM elements), copies them to new DOM structure,
 	 * and hides them.
-	 * 
+	 *
 	 * @param {HTMLElement} files - DOM element with files listed
 	 */
 	copyAndHideFiles( files: HTMLElement ): void
@@ -319,7 +331,7 @@ class GitLabTree
 
 	/**
 	 * It loops through files finding maximum common folder structure.
-	 * 
+	 *
 	 * @param {string[]} fileNames - list of filenames
 	 * @return {string} - maximum common folder path
 	 */
@@ -363,7 +375,7 @@ class GitLabTree
 
 	/**
 	 * Removes path prefix from all fileNames.
-	 * 
+	 *
 	 * @param {string[]} fileNames - list of filenames
 	 * @param {string} prefix - prefix to be removed
 	 * @return {string[]} - trimmed filenames
@@ -389,9 +401,9 @@ class GitLabTree
 	/**
 	 * Creates folder structure from given list of files.
 	 * Folders are objects, files are numbers.
-	 * 
+	 *
 	 * Example: [ test/foo/spec1.ts, test/foo/spec2.ts ] -> { test: { foo: { spec1: 0, spec1: 1 }}}
-	 * 
+	 *
 	 * @param {string} fileNames - list of filenames
 	 * @return {any} generated folder structure
 	 */
@@ -438,7 +450,7 @@ class GitLabTree
 
 	/**
 	 * Converts folder structure into DOM recursively.
-	 * 
+	 *
 	 * @param {string} folderName - name of the currently proceed folder
 	 * @param {string} structure - folder structure (for example see `createFolderStructure`)
 	 * @return {HTMLDivElement} corresponding folder structure
@@ -474,6 +486,7 @@ class GitLabTree
 					// Color
 
 					let fileStateClass;
+					let fileSeenClass = CSS_PREFIX + '-file-seen';
 					switch ( metadata.type )
 					{
 						case EFileState.ADDED: fileStateClass = CSS_PREFIX + '-file-added'; break;
@@ -482,6 +495,13 @@ class GitLabTree
 						default: fileStateClass = CSS_PREFIX + '-file-updated'; break;
 					}
 
+					if(metadata.type == EFileState.ADDED || metadata.type == EFileState.UPDATED) {
+					    if(!this.databaseState[metadata.hash]){
+					        fileSeenClass = CSS_PREFIX + '-file-unseen';
+
+                        }
+                    }
+
 
 					// Was file commented?
 
@@ -489,7 +509,7 @@ class GitLabTree
 					{
 						let commentElement = document.createElement('i');
 						commentElement.classList.add( 'fa', 'fa-comments-o', CSS_PREFIX + '-file-commented-icon' );
-						file.appendChild( commentElement ); 
+						file.appendChild( commentElement );
 					}
 
 
@@ -500,6 +520,7 @@ class GitLabTree
 					file.appendChild( contentElement );
 
 					file.classList.add( fileStateClass );
+					file.classList.add( fileSeenClass );
 					files.push( file );
 				}
 
@@ -519,7 +540,7 @@ class GitLabTree
 
 	/**
 	 * Expands or collapses folder after click.
-	 * 
+	 *
 	 * @param {MouseEvent} event - click event on .holder element
 	 */
 	toggleExpand( event: MouseEvent )
@@ -538,7 +559,7 @@ class GitLabTree
 
 	/**
 	 * Callback called after hash has changed. It searches for "diff-[FILE ID]"" in hash,
-	 * and displays corresponding file (based on id). 
+	 * and displays corresponding file (based on id).
 	 */
 	hashChanged(): void
 	{
@@ -549,7 +570,7 @@ class GitLabTree
 
 	/**
 	 * Shows file based on id.
-	 * 
+	 *
 	 * @param {number} id - id of file to be shown
 	 */
 	showFile( hash?: string ): void
@@ -564,12 +585,18 @@ class GitLabTree
 			this.getFileHolderByHash( this.lastActive ).classList.add( CSS_PREFIX + '-hidden' );
 			this.getFileLinkByHash( this.lastActive ).classList.remove( CSS_PREFIX + '-file-active' );
 		}
-		
-		
+
+
 		hash = this.metadata.filter( m => m.hash === hash ).length > 0 ? hash : this.metadata[0].hash; // if hash is invalid use default hash
 
 		this.getFileHolderByHash( hash ).classList.remove( CSS_PREFIX + '-hidden' );
 		this.getFileLinkByHash( hash ).classList.add( CSS_PREFIX + '-file-active' );
+		this.getFileLinkByHash( hash ).classList.remove( CSS_PREFIX + '-file-unseen' );
+
+
+		this.databaseState[hash] = true;
+
+        chrome.storage.local.set(this.databaseState);
 
 		this.lastActive = hash;
 	}

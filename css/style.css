@@ -124,3 +124,9 @@
 {
     margin-right: 7px;
 }
+
+.gitlab-tree-plugin-file-unseen
+{
+    font-weight: bold;
+    font-style: italic;
+}
