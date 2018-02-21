@@ -1,6 +1,6 @@
 const CSS_PREFIX = 'gitlab-tree-plugin';
 
-enum EFileState { ADDED, UPDATED, RENAMED, DELETED };
+enum EFileState { ADDED, UPDATED, RENAMED, DELETED }
 
 interface IMetadata
 {
@@ -31,7 +31,67 @@ class GitLabTree
 
 	constructor()
 	{
-		this.init();
+        // Detection if we are on GitLab page
+        const isGitLab: Element = document.querySelector( 'meta[content="GitLab"]' );
+        if ( ! isGitLab ) { return; }
+
+		this.init().then(() => {
+            // Detection if we have any files to generate tree from
+
+            const files: HTMLElement = document.querySelector( '.files' ) as HTMLElement;
+
+            if ( ! files ) { return; }
+
+            this.fileHolders = files.querySelectorAll( '.file-holder' );
+            if ( ! files || this.fileHolders.length === 0 ) { return; }
+
+            files.classList.add( CSS_PREFIX );
+
+
+            // Obtain metadata
+
+            this.metadata = this.obtainMetadata();
+            if ( this.metadata.length === 0 ) { return; }
+            this.obtainCommentedFiles();
+
+
+            // Hide files
+
+            this.copyAndHideFiles( files );
+
+
+            // Analyze filenames
+
+            this.fileNames = this.metadata.map( m => m.filename );
+            this.pathPrefix = this.getPrefixPath( this.fileNames );
+            this.strippedFileNames = this.removePathPrefix( this.fileNames, this.pathPrefix );
+
+
+            // Create and display DOM
+
+            const fileNamesDOM: HTMLDivElement = this.convertFolderStructureToDOM( this.pathPrefix, this.createFolderStructure( this.strippedFileNames ) )
+
+            this.leftElement.appendChild( fileNamesDOM );
+            files.appendChild( this.wrapperElement );
+
+
+            // Show file based on hash id
+
+            const currentFileHash: string = location.hash;
+            this.showFile( currentFileHash );
+
+
+            // Add expanding feature
+
+            this.expandListener = ( e: MouseEvent ) => (e.target as HTMLElement).classList.contains( 'holder' ) ? this.toggleExpand( e ) : undefined;
+            document.addEventListener( 'click', this.expandListener );
+
+
+            // Add listener for changes
+
+            this.hashChangeListener = this.hashChanged.bind( this )
+            window.addEventListener( 'hashchange', this.hashChangeListener );
+        })
 	}
 
 
@@ -57,77 +117,14 @@ class GitLabTree
 		this.leftElement.classList.add( CSS_PREFIX + '-left' );
 		this.rightElement.classList.add( CSS_PREFIX + '-right' );
 
-		await this.obtainSeenState();
-
-        // Detection if we are on GitLab page
-
-        const isGitLab: Element = document.querySelector( 'meta[content="GitLab"]' );
-        if ( ! isGitLab ) { return; }
-
-
-        // Detection if we have any files to generate tree from
-
-        const files: HTMLElement = document.querySelector( '.files' ) as HTMLElement;
-
-        if ( ! files ) { return; }
-
-        this.fileHolders = files.querySelectorAll( '.file-holder' );
-        if ( ! files || this.fileHolders.length === 0 ) { return; }
-
-        files.classList.add( CSS_PREFIX );
-
-
-        // Obtain metadata
-
-        this.metadata = this.obtainMetadata();
-        if ( this.metadata.length === 0 ) { return; }
-        this.obtainCommentedFiles();
-
-
-        // Hide files
-
-        this.copyAndHideFiles( files );
-
-
-        // Analyze filenames
-
-        this.fileNames = this.metadata.map( m => m.filename );
-        this.pathPrefix = this.getPrefixPath( this.fileNames );
-        this.strippedFileNames = this.removePathPrefix( this.fileNames, this.pathPrefix );
-
-
-        // Create and display DOM
-
-        const fileNamesDOM: HTMLDivElement = this.convertFolderStructureToDOM( this.pathPrefix, this.createFolderStructure( this.strippedFileNames ) )
-
-        this.leftElement.appendChild( fileNamesDOM )
-        files.appendChild( this.wrapperElement );
-
-
-        // Show file based on hash id
-
-        const currentFileHash: string = location.hash;
-        this.showFile( currentFileHash );
-
-
-        // Add expanding feature
-
-        this.expandListener = ( e: MouseEvent ) => (e.target as HTMLElement).classList.contains( 'holder' ) ? this.toggleExpand( e ) : undefined;
-        document.addEventListener( 'click', this.expandListener );
-
-
-        // Add listener for changes
-
-        this.hashChangeListener = this.hashChanged.bind( this )
-        window.addEventListener( 'hashchange', this.hashChangeListener );
+        this.databaseState = await this.obtainSeenState();
 	}
 
     obtainSeenState(): Promise<object>
     {
         return new Promise((resolve) => {
             chrome.storage.local.get((obj) => {
-                this.databaseState = obj;
-                resolve();
+                resolve(obj);
             })
         });
 
