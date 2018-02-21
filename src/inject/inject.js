@@ -6,14 +6,54 @@ var EFileState;
     EFileState[EFileState["RENAMED"] = 2] = "RENAMED";
     EFileState[EFileState["DELETED"] = 3] = "DELETED";
 })(EFileState || (EFileState = {}));
-;
 class GitLabTree {
     constructor() {
         this.wrapperElement = document.createElement('div');
         this.leftElement = document.createElement('div');
         this.rightElement = document.createElement('div');
         this.lastActive = '';
-        this.init();
+        // Detection if we are on GitLab page
+        const isGitLab = document.querySelector('meta[content="GitLab"]');
+        if (!isGitLab) {
+            return;
+        }
+        this.init().then(() => {
+            // Detection if we have any files to generate tree from
+            const files = document.querySelector('.files');
+            if (!files) {
+                return;
+            }
+            this.fileHolders = files.querySelectorAll('.file-holder');
+            if (!files || this.fileHolders.length === 0) {
+                return;
+            }
+            files.classList.add(CSS_PREFIX);
+            // Obtain metadata
+            this.metadata = this.obtainMetadata();
+            if (this.metadata.length === 0) {
+                return;
+            }
+            this.obtainCommentedFiles();
+            // Hide files
+            this.copyAndHideFiles(files);
+            // Analyze filenames
+            this.fileNames = this.metadata.map(m => m.filename);
+            this.pathPrefix = this.getPrefixPath(this.fileNames);
+            this.strippedFileNames = this.removePathPrefix(this.fileNames, this.pathPrefix);
+            // Create and display DOM
+            const fileNamesDOM = this.convertFolderStructureToDOM(this.pathPrefix, this.createFolderStructure(this.strippedFileNames));
+            this.leftElement.appendChild(fileNamesDOM);
+            files.appendChild(this.wrapperElement);
+            // Show file based on hash id
+            const currentFileHash = location.hash;
+            this.showFile(currentFileHash);
+            // Add expanding feature
+            this.expandListener = (e) => e.target.classList.contains('holder') ? this.toggleExpand(e) : undefined;
+            document.addEventListener('click', this.expandListener);
+            // Add listener for changes
+            this.hashChangeListener = this.hashChanged.bind(this);
+            window.addEventListener('hashchange', this.hashChangeListener);
+        });
     }
     /**
      * Kind of destructor.
@@ -31,53 +71,12 @@ class GitLabTree {
         this.wrapperElement.classList.add(CSS_PREFIX + '-wrapper');
         this.leftElement.classList.add(CSS_PREFIX + '-left');
         this.rightElement.classList.add(CSS_PREFIX + '-right');
-        await this.obtainSeenState();
-        // Detection if we are on GitLab page
-        const isGitLab = document.querySelector('meta[content="GitLab"]');
-        if (!isGitLab) {
-            return;
-        }
-        // Detection if we have any files to generate tree from
-        const files = document.querySelector('.files');
-        if (!files) {
-            return;
-        }
-        this.fileHolders = files.querySelectorAll('.file-holder');
-        if (!files || this.fileHolders.length === 0) {
-            return;
-        }
-        files.classList.add(CSS_PREFIX);
-        // Obtain metadata
-        this.metadata = this.obtainMetadata();
-        if (this.metadata.length === 0) {
-            return;
-        }
-        this.obtainCommentedFiles();
-        // Hide files
-        this.copyAndHideFiles(files);
-        // Analyze filenames
-        this.fileNames = this.metadata.map(m => m.filename);
-        this.pathPrefix = this.getPrefixPath(this.fileNames);
-        this.strippedFileNames = this.removePathPrefix(this.fileNames, this.pathPrefix);
-        // Create and display DOM
-        const fileNamesDOM = this.convertFolderStructureToDOM(this.pathPrefix, this.createFolderStructure(this.strippedFileNames));
-        this.leftElement.appendChild(fileNamesDOM);
-        files.appendChild(this.wrapperElement);
-        // Show file based on hash id
-        const currentFileHash = location.hash;
-        this.showFile(currentFileHash);
-        // Add expanding feature
-        this.expandListener = (e) => e.target.classList.contains('holder') ? this.toggleExpand(e) : undefined;
-        document.addEventListener('click', this.expandListener);
-        // Add listener for changes
-        this.hashChangeListener = this.hashChanged.bind(this);
-        window.addEventListener('hashchange', this.hashChangeListener);
+        this.databaseState = await this.obtainSeenState();
     }
     obtainSeenState() {
         return new Promise((resolve) => {
             chrome.storage.local.get((obj) => {
-                this.databaseState = obj;
-                resolve();
+                resolve(obj);
             });
         });
     }
